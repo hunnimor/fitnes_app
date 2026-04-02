@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "ФитИИ",
+    "slug": "fitii",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "fitii",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#09090b"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fitii.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "ФитИИ использует камеру для анализа техники упражнений",
+        "NSMicrophoneUsageDescription": "ФитИИ использует микрофон для голосовых подсказок"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#09090b"
+      },
+      "package": "com.fitii.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "ФитИИ использует камеру для анализа техники упражнений."
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

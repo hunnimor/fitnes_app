@@ -1,0 +1,53 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ["./app/**/*.{js,jsx,ts,tsx}", "./components/**/*.{js,jsx,ts,tsx}"],
+  presets: [require("nativewind/preset")],
+  theme: {
+    extend: {
+      colors: {
+        background: "#09090b",
+        foreground: "#fafafa",
+        card: "#18181b",
+        "card-foreground": "#fafafa",
+        popover: "#18181b",
+        "popover-foreground": "#fafafa",
+        primary: "#a3e635",
+        "primary-foreground": "#09090b",
+        secondary: "#3b82f6",
+        "secondary-foreground": "#fafafa",
+        muted: "#27272a",
+        "muted-foreground": "#71717a",
+        accent: "#a3e635",
+        "accent-foreground": "#09090b",
+        destructive: "#ef4444",
+        "destructive-foreground": "#fafafa",
+        border: "#27272a",
+        input: "#27272a",
+        ring: "#a3e635",
+        "neon-lime": "#a3e635",
+        "neon-lime-glow": "rgba(163, 230, 53, 0.25)",
+        "electric-blue": "#3b82f6",
+        "electric-blue-glow": "rgba(59, 130, 246, 0.25)",
+        surface: "#18181b",
+        "surface-2": "#27272a",
+      },
+      borderRadius: {
+        sm: "calc(0.875rem - 4px)",
+        md: "calc(0.875rem - 2px)",
+        lg: "0.875rem",
+        xl: "calc(0.875rem + 4px)",
+        "2xl": "1.25rem",
+        "3xl": "1.5rem",
+      },
+      fontFamily: {
+        sans: ["Inter", "System"],
+        mono: ["Geist Mono", "System"],
+      },
+      boxShadow: {
+        "glow-lime": "0 0 20px rgba(163, 230, 53, 0.25), 0 0 40px rgba(163, 230, 53, 0.1)",
+        "glow-blue": "0 0 20px rgba(59, 130, 246, 0.25), 0 0 40px rgba(59, 130, 246, 0.1)",
+      },
+    },
+  },
+  plugins: [],
+};
