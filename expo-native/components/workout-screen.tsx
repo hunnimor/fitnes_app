@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Modal,
-  Dimensions,
+  ActivityIndicator,
 } from "react-native";
 import {
   Pause,
@@ -18,9 +18,17 @@ import {
   AlertCircle,
   CheckCircle,
   MinusCircle,
+  RotateCcw,
 } from "lucide-react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
+import {
+  detectPose,
+  initPoseDetector,
+  type Keypoint,
+  SKELETON_CONNECTIONS,
+} from "@/lib/pose-detection";
+import { analyzeForm, RepCounter, type FormAnalysis } from "@/lib/exercise-analyzer";
 
 const exercises = [
   { name: "Берпи", reps: 20, muscles: "Всё тело", tip: "Держи корпус в планке на спуске" },
@@ -29,30 +37,51 @@ const exercises = [
   { name: "Скалолаз", reps: 30, muscles: "Пресс, Кардио", tip: "Держи таз на уровне плеч" },
 ];
 
-// Skeleton overlay component
-function SkeletonOverlay({ quality }: { quality: "good" | "ok" | "bad" }) {
-  const color = quality === "good" ? "#a3e635" : quality === "ok" ? "#eab308" : "#ef4444";
+// ─── Skeleton overlay drawn on top of camera ───
+function SkeletonOverlay({ keypoints }: { keypoints: Keypoint[] }) {
+  const points = keypoints.filter((k) => k.confidence > 0.4);
 
   return (
     <View style={styles.skeletonContainer}>
-      {/* Simplified skeleton representation using SVG-like shapes */}
-      <View style={[styles.joint, { backgroundColor: color, top: 40, left: "50%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 76, left: "28%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 76, left: "72%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 180, left: "50%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 136, left: "18%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 136, left: "82%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 180, left: "36%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 180, left: "64%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 280, left: "30%" }]} />
-      <View style={[styles.joint, { backgroundColor: color, top: 280, left: "70%" }]} />
+      {/* Draw connections */}
+      {SKELETON_CONNECTIONS.map(([a, b], i) => {
+        const kpA = keypoints[a];
+        const kpB = keypoints[b];
+        if (!kpA || !kpB || kpA.confidence < 0.4 || kpB.confidence < 0.4) return null;
+        return (
+          <View
+            key={`line-${i}`}
+            style={[
+              styles.skeletonLine,
+              {
+                left: kpA.x,
+                top: kpA.y,
+                width: Math.sqrt((kpB.x - kpA.x) ** 2 + (kpB.y - kpA.y) ** 2),
+                transform: [
+                  { rotate: `${Math.atan2(kpB.y - kpA.y, kpB.x - kpA.x)}rad` },
+                ],
+              },
+            ]}
+          />
+        );
+      })}
+      {/* Draw joints */}
+      {points.map((kp) => (
+        <View
+          key={kp.label}
+          style={[
+            styles.joint,
+            { left: kp.x - 4, top: kp.y - 4 },
+          ]}
+        />
+      ))}
     </View>
   );
 }
 
-// Quality ring component
-function QualityRing({ quality }: { quality: "good" | "ok" | "bad" }) {
-  const value = quality === "good" ? 92 : quality === "ok" ? 67 : 34;
+// ─── Quality ring ───
+function QualityRing({ score }: { score: number }) {
+  const quality: "good" | "ok" | "bad" = score >= 75 ? "good" : score >= 50 ? "ok" : "bad";
   const color = quality === "good" ? "#a3e635" : quality === "ok" ? "#eab308" : "#ef4444";
   const label = quality === "good" ? "Отлично" : quality === "ok" ? "Нормально" : "Ошибка";
   const Icon = quality === "good" ? CheckCircle : quality === "ok" ? MinusCircle : AlertCircle;
@@ -74,7 +103,7 @@ function QualityRing({ quality }: { quality: "good" | "ok" | "bad" }) {
         </View>
       </View>
       <Text style={[styles.qualityLabel, { color }]}>{label}</Text>
-      <Text style={styles.qualityPercent}>{value}%</Text>
+      <Text style={styles.qualityPercent}>{score}%</Text>
     </View>
   );
 }
@@ -84,26 +113,56 @@ export function WorkoutScreen() {
   const [reps, setReps] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [restTime, setRestTime] = useState(0);
-  const [quality, setQuality] = useState<"good" | "ok" | "bad">("good");
+  const [formScore, setFormScore] = useState(100);
+  const [corrections, setCorrections] = useState<string[]>([]);
   const [showSheet, setShowSheet] = useState(false);
   const [showAITip, setShowAITip] = useState(true);
   const [workoutTime, setWorkoutTime] = useState(0);
   const [permission, requestPermission] = useCameraPermissions();
+  const [cameraFacing, setCameraFacing] = useState<CameraType>("front");
+  const [poseLoading, setPoseLoading] = useState(true);
+  const [keypoints, setKeypoints] = useState<Keypoint[]>([]);
+
+  const repCounterRef = useRef(new RepCounter());
+  const detectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cameraRef = useRef<any>(null);
 
   const exercise = exercises[exerciseIdx];
 
-  // Simulate rep counting
+  // Init pose detector on mount
+  useEffect(() => {
+    initPoseDetector().then(() => setPoseLoading(false));
+    return () => {
+      if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
+    };
+  }, []);
+
+  // Pose detection loop — runs every 300ms
   useEffect(() => {
     if (!isPlaying) return;
-    const interval = setInterval(() => {
-      setReps((prev) => {
-        if (prev < exercise.reps) return prev + 1;
-        return prev;
-      });
-      setQuality(["good", "good", "good", "ok", "bad", "good"][Math.floor(Math.random() * 6)] as "good" | "ok" | "bad");
-    }, 1800);
-    return () => clearInterval(interval);
-  }, [isPlaying, exercise.reps]);
+
+    detectionIntervalRef.current = setInterval(async () => {
+      try {
+        const result = await detectPose();
+        setKeypoints(result.keypoints);
+
+        // Analyze form
+        const analysis: FormAnalysis = analyzeForm(result.keypoints, exercise.name);
+        setFormScore(analysis.score);
+        setCorrections(analysis.corrections);
+
+        // Update rep counter
+        const count = repCounterRef.current.update(analysis.phase);
+        setReps(count);
+      } catch (err) {
+        console.warn("Pose detection error:", err);
+      }
+    }, 300);
+
+    return () => {
+      if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
+    };
+  }, [isPlaying, exercise.name]);
 
   // Workout timer
   useEffect(() => {
@@ -114,14 +173,19 @@ export function WorkoutScreen() {
     return () => clearInterval(timer);
   }, [isPlaying]);
 
-  const formatTime = (s: number) =>
-    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  const formatTime = useCallback(
+    (s: number) =>
+      `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`,
+    []
+  );
 
-  const handleNext = () => {
+  const handleNext = useCallback(() => {
+    repCounterRef.current.reset();
     setExerciseIdx((prev) => (prev + 1) % exercises.length);
     setReps(0);
     setRestTime(30);
-    setQuality("good");
+    setFormScore(100);
+    setCorrections([]);
     const countdown = setInterval(() => {
       setRestTime((prev) => {
         if (prev <= 1) {
@@ -131,13 +195,14 @@ export function WorkoutScreen() {
         return prev - 1;
       });
     }, 1000);
-  };
+  }, []);
 
-  if (!permission) {
-    return <View style={styles.container} />;
-  }
+  const handleFlipCamera = useCallback(() => {
+    setCameraFacing((prev) => (prev === "front" ? "back" : "front"));
+  }, []);
 
-  if (!permission.granted) {
+  // ─── Permission denied screen ───
+  if (permission && !permission.granted) {
     return (
       <View style={styles.container}>
         <View style={styles.permissionContainer}>
@@ -158,11 +223,23 @@ export function WorkoutScreen() {
     );
   }
 
+  if (!permission) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" color="#a3e635" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {/* Camera */}
-      <CameraView style={styles.camera} facing="back" />
-      
+      {/* Camera — front facing by default, toggleable */}
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing={cameraFacing}
+      />
+
       {/* Gradient overlay */}
       <View style={styles.gradientOverlay}>
         <LinearGradient
@@ -172,9 +249,19 @@ export function WorkoutScreen() {
       </View>
 
       {/* Skeleton overlay */}
-      <View style={styles.skeletonWrapper}>
-        <SkeletonOverlay quality={quality} />
-      </View>
+      {keypoints.length > 0 && (
+        <View style={styles.skeletonWrapper}>
+          <SkeletonOverlay keypoints={keypoints} />
+        </View>
+      )}
+
+      {/* Pose loading indicator */}
+      {poseLoading && (
+        <View style={styles.poseLoadingOverlay}>
+          <ActivityIndicator size="large" color="#a3e635" />
+          <Text style={styles.poseLoadingText}>Загрузка ИИ-модели...</Text>
+        </View>
+      )}
 
       {/* Top overlay */}
       <View style={styles.topOverlay}>
@@ -185,7 +272,7 @@ export function WorkoutScreen() {
         </View>
 
         {/* Quality ring */}
-        <QualityRing quality={quality} />
+        <QualityRing score={formScore} />
 
         {/* Reps counter */}
         <View style={styles.overlayCard}>
@@ -197,8 +284,29 @@ export function WorkoutScreen() {
         </View>
       </View>
 
+      {/* Camera flip button */}
+      <TouchableOpacity
+        style={styles.flipCameraButton}
+        onPress={handleFlipCamera}
+        activeOpacity={0.8}
+      >
+        <RotateCcw size={20} color="#fafafa" />
+      </TouchableOpacity>
+
+      {/* Correction tips */}
+      {corrections.length > 0 && (
+        <View style={styles.correctionContainer}>
+          {corrections.map((tip, i) => (
+            <View key={i} style={styles.correctionBubble}>
+              <AlertCircle size={14} color="#ef4444" />
+              <Text style={styles.correctionText}>{tip}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
       {/* AI Voice tip bubble */}
-      {showAITip && (
+      {showAITip && corrections.length === 0 && (
         <View style={styles.aiTipContainer}>
           <View style={styles.aiTipBubble}>
             <Volume2 size={16} color="#3b82f6" />
@@ -229,7 +337,7 @@ export function WorkoutScreen() {
           <View
             style={[
               styles.progressBarFill,
-              { width: `${(reps / exercise.reps) * 100}%` },
+              { width: `${exercise.reps > 0 ? Math.min((reps / exercise.reps) * 100, 100) : 0}%` },
             ]}
           />
         </View>
@@ -265,7 +373,7 @@ export function WorkoutScreen() {
           activeOpacity={0.8}
         >
           {isPlaying ? (
-            <Pause size={20} color={isPlaying ? "#fafafa" : "#09090b"} />
+            <Pause size={20} color="#fafafa" />
           ) : (
             <Play size={20} color="#09090b" fill="#09090b" />
           )}
@@ -341,12 +449,14 @@ export function WorkoutScreen() {
   );
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#09090b",
+  },
+  center: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   camera: {
     ...StyleSheet.absoluteFillObject,
@@ -356,25 +466,31 @@ const styles = StyleSheet.create({
   },
   skeletonWrapper: {
     ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
   },
   skeletonContainer: {
-    width: 140,
-    height: 280,
-    opacity: 0.85,
+    ...StyleSheet.absoluteFillObject,
   },
   joint: {
     position: "absolute",
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginLeft: -4,
-    marginTop: -4,
+    backgroundColor: "#a3e635",
     shadowColor: "#a3e635",
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.6,
     shadowRadius: 4,
+  },
+  skeletonLine: {
+    position: "absolute",
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: "rgba(163,230,53,0.7)",
+    shadowColor: "#a3e635",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    transformOrigin: "left",
   },
   permissionContainer: {
     flex: 1,
@@ -406,6 +522,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     color: "#09090b",
+  },
+  poseLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(9,9,11,0.8)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  poseLoadingText: {
+    fontSize: 14,
+    color: "#a3e635",
+    fontWeight: "600",
   },
   topOverlay: {
     flexDirection: "row",
@@ -485,6 +613,40 @@ const styles = StyleSheet.create({
     color: "#71717a",
     fontWeight: "400",
     marginLeft: 2,
+  },
+  flipCameraButton: {
+    position: "absolute",
+    top: 100,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  correctionContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 8,
+    gap: 6,
+  },
+  correctionBubble: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: "rgba(239,68,68,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(239,68,68,0.25)",
+  },
+  correctionText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#ef4444",
+    fontWeight: "500",
   },
   aiTipContainer: {
     paddingHorizontal: 20,
