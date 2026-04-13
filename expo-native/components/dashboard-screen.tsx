@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
 } from "react-native";
+import { useRouter } from "expo-router";
 import {
   Flame,
   Play,
@@ -16,6 +17,7 @@ import {
   Bell,
   Zap,
 } from "lucide-react-native";
+import { useAuth } from "@/lib/auth-context";
 
 const weekData = [
   { day: "Пн", score: 60 },
@@ -33,8 +35,12 @@ const upcomingWorkouts = [
 ];
 
 export function DashboardScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
   const [greeting, setGreeting] = useState("Доброе утро");
   const [streakAnimated, setStreakAnimated] = useState(false);
+
+  const displayName = user?.user_metadata?.username ?? user?.email?.split("@")[0] ?? "Атлет";
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -52,7 +58,7 @@ export function DashboardScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.greetingText}>{greeting},</Text>
-          <Text style={styles.nameText}>Алексей</Text>
+          <Text style={styles.nameText}>{displayName}</Text>
         </View>
         <View style={styles.headerActions}>
           {/* Streak badge */}
@@ -103,7 +109,11 @@ export function DashboardScreen() {
             ))}
           </View>
 
-          <TouchableOpacity style={styles.startWorkoutButton} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={styles.startWorkoutButton}
+            onPress={() => router.push("/(tabs)/workout")}
+            activeOpacity={0.8}
+          >
             <Play size={20} color="#09090b" fill="#09090b" />
             <Text style={styles.startWorkoutButtonText}>Начать тренировку</Text>
           </TouchableOpacity>

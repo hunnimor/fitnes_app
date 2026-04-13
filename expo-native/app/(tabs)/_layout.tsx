@@ -1,8 +1,32 @@
-import { Tabs } from "expo-router";
-import { View, StyleSheet } from "react-native";
+import { Tabs, useRouter } from "expo-router";
+import { StyleSheet, ActivityIndicator, View, Platform } from "react-native";
 import { Home, Dumbbell, BarChart2, User } from "lucide-react-native";
+import { useAuth } from "@/lib/auth-context";
+import { useEffect } from "react";
 
 export default function TabsLayout() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+
+  // Auth guard: only run on native (iOS/Android). Web doesn't need auth gating.
+  useEffect(() => {
+    if (Platform.OS !== "web" && !loading && !user) {
+      router.replace("/auth/login" as any);
+    }
+  }, [loading, user]);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#a3e635" />
+      </View>
+    );
+  }
+
+  if (Platform.OS !== "web" && !user) {
+    return null; // useEffect handles redirect
+  }
+
   return (
     <Tabs
       screenOptions={{
@@ -62,5 +86,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
     marginTop: 4,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#09090b",
   },
 });

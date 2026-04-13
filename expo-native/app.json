@@ -19,7 +19,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "ФитИИ использует камеру для анализа техники упражнений",
         "NSMicrophoneUsageDescription": "ФитИИ использует микрофон для голосовых подсказок"
-      }
+      },
+      "associatedDomains": ["applinks:fitii.app"]
     },
     "android": {
       "adaptiveIcon": {
@@ -30,6 +31,20 @@
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "fitii.app",
+              "pathPrefix": "/auth/callback"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "web": {

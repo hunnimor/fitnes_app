@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Modal,
 } from "react-native";
+import { useRouter, type Href } from "expo-router";
 import {
   Bell,
   Shield,
@@ -21,6 +22,7 @@ import {
   Flame,
   X,
 } from "lucide-react-native";
+import { useAuth } from "@/lib/auth-context";
 
 const integrations = [
   { id: "apple", label: "Apple Health", connected: true, icon: Heart, color: "#ef4444" },
@@ -39,9 +41,16 @@ const proFeatures = [
 type ModalType = "logout" | "upgrade" | null;
 
 export function ProfileScreen() {
+  const router = useRouter();
+  const { user, signOut } = useAuth();
   const [notifications, setNotifications] = useState(true);
   const [privacy, setPrivacy] = useState(false);
   const [modal, setModal] = useState<ModalType>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const displayName = user?.user_metadata?.username ?? user?.email?.split("@")[0] ?? "Пользователь";
+  const displayEmail = user?.email ?? "";
+  const initial = displayName.charAt(0).toUpperCase();
 
   const isPro = false;
 
@@ -56,7 +65,7 @@ export function ProfileScreen() {
         {/* Avatar */}
         <View style={styles.avatarContainer}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>А</Text>
+            <Text style={styles.avatarText}>{initial}</Text>
           </View>
           {isPro && (
             <View style={styles.proBadge}>
@@ -65,8 +74,8 @@ export function ProfileScreen() {
           )}
         </View>
 
-        <Text style={styles.name}>Алексей Петров</Text>
-        <Text style={styles.email}>alexey@example.com</Text>
+        <Text style={styles.name}>{displayName}</Text>
+        <Text style={styles.email}>{displayEmail}</Text>
 
         {/* Level badge */}
         <View style={styles.levelBadge}>
@@ -269,10 +278,19 @@ export function ProfileScreen() {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.modalConfirmButton}
-                    onPress={() => setModal(null)}
+                    onPress={async () => {
+                      setLoggingOut(true);
+                      await signOut();
+                      setLoggingOut(false);
+                      setModal(null);
+                      router.replace("/auth/login" as Href);
+                    }}
+                    disabled={loggingOut}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.modalConfirmText}>Выйти</Text>
+                    <Text style={styles.modalConfirmText}>
+                      {loggingOut ? "..." : "Выйти"}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </>
